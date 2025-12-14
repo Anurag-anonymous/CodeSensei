@@ -18,7 +18,7 @@ app = FastAPI(title="CodeSensei API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://localhost:3000", "https://192.168.56.1:3000"],
+    allow_origins=["https://localhost:3000", "https://192.168.56.1:3000" , "https://*.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],  # Allows all HTTP methods (GET, POST, etc.)
     allow_headers=["*"],  # Allows all headers
