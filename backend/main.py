@@ -20,7 +20,7 @@ PRODUCTION_URL = os.getenv("RENDER_EXTERNAL_URL", "")  # Render provides this
 
 # ========== CORS CONFIGURATION ==========
 # Your frontend URL on Vercel
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://code-sensei-seven.vercel.app/")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://code-sensei-seven.vercel.app")
 
 # Set allowed origins
 if IS_PRODUCTION and PRODUCTION_URL:
@@ -28,22 +28,12 @@ if IS_PRODUCTION and PRODUCTION_URL:
     allow_origins = [
         FRONTEND_URL,
         PRODUCTION_URL,
-        "https://code-sensei-seven.vercel.app",  # Your exact Vercel URL
-        "https://*.vercel.app",                  # Any Vercel deployment
-        "https://codesensei-eg4h.onrender.com",
         "http://localhost:3000",  # For local testing
         "https://localhost:3000",
     ]
 else:
     # Development
     allow_origins = [
-        "https://code-sensei-seven.vercel.app",  # Your exact Vercel URL
-        "https://*.vercel.app",                  # Any Vercel deployment
-        "https://codesensei-eg4h.onrender.com",  # Your Render backend
-        "http://localhost:3000",
-        "https://localhost:3000",
-        "http://localhost:8000",
-        "https://localhost:8000",
         "https://localhost:3000",
         "https://192.168.56.1:3000",
         "http://localhost:3000",
