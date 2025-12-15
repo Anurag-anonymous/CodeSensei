@@ -171,28 +171,32 @@ async def health_check():
     return {"status": "healthy"}
 
 
+# ... your existing imports and code ...
+
 if __name__ == "__main__":
-    # Get port from environment (Render provides this)
-    port = int(os.getenv("PORT", 8000))
+    # === SAFE PORT HANDLING FOR RENDER ===
+    port_str = os.getenv("PORT", "").strip()
     
-    if IS_PRODUCTION:
-        # Production: HTTP only (Render handles HTTPS termination)
-        print(f"🚀 Production mode: Starting on port {port}")
-        print(f"   Frontend URL: {FRONTEND_URL}")
-        print(f"   Backend URL: {PRODUCTION_URL}")
-        print(f"   GitHub Token: {'Configured' if GITHUB_TOKEN else 'NOT CONFIGURED'}")
-        
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=port,
-            # NO SSL here - Render's load balancer provides HTTPS
-        )
+    if port_str and port_str.isdigit():
+        port = int(port_str)
+        print(f"✅ Render provided PORT: {port}")
     else:
-        # Development: Local HTTPS with self-signed certificates
-        print(f"🔧 Development mode: Starting HTTPS on port {port}")
-        
-        # Check if certificate files exist
+        port = 8000
+        print(f"⚠️  Using default PORT: {port}")
+    
+    # === DETECT ENVIRONMENT ===
+    is_render = os.getenv("RENDER") is not None
+    
+    print(f"\n🚀 Starting CodeSensei Backend")
+    print(f"   Environment: {'Production (Render)' if is_render else 'Development'}")
+    print(f"   Port: {port}")
+    print(f"   GitHub Token: {'✅ Loaded' if GITHUB_TOKEN else '❌ Missing'}")
+    
+    if is_render:
+        # Production on Render - HTTP only
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    else:
+        # Local development - try HTTPS, fallback to HTTP
         cert_path = Path(__file__).parent / "cert.pem"
         key_path = Path(__file__).parent / "key.pem"
         
@@ -205,5 +209,5 @@ if __name__ == "__main__":
                 ssl_certfile=str(cert_path)
             )
         else:
-            print("⚠️  Warning: SSL certificates not found. Starting HTTP for development.")
+            print("⚠️  SSL certs not found. Starting HTTP...")
             uvicorn.run(app, host="0.0.0.0", port=port)
