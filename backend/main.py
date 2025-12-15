@@ -13,16 +13,42 @@ import uvicorn
 env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path)
 
-app = FastAPI(title="CodeSensei API")
+# ========== 2. ENVIRONMENT DETECTION ==========
 
+IS_PRODUCTION = os.getenv("RENDER") is not None  # Render sets this
+PRODUCTION_URL = os.getenv("RENDER_EXTERNAL_URL", "")  # Render provides this
+
+# ========== CORS CONFIGURATION ==========
+# Your frontend URL on Vercel
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://code-sensei-seven.vercel.app/")
+
+# Set allowed origins
+if IS_PRODUCTION and PRODUCTION_URL:
+    # Production: Allow your Vercel frontend and your Render backend
+    allow_origins = [
+        FRONTEND_URL,
+        PRODUCTION_URL,
+        "http://localhost:3000",  # For local testing
+        "https://localhost:3000",
+    ]
+else:
+    # Development
+    allow_origins = [
+        "https://localhost:3000",
+        "https://192.168.56.1:3000",
+        "http://localhost:3000",
+    ]
+
+app = FastAPI(title="CodeSensei API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://localhost:3000", "https://192.168.56.1:3000" , "https://*.vercel.app"],
+    allow_origins=allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
 
 class RepoRequest(BaseModel):
     github_url: str
@@ -146,12 +172,38 @@ async def health_check():
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        ssl_keyfile="./key.pem",    # Add these two lines
-        ssl_certfile="./cert.pem"   # to enable HTTPS
-    )
+    # Get port from environment (Render provides this)
+    port = int(os.getenv("PORT", 8000))
     
+    if IS_PRODUCTION:
+        # Production: HTTP only (Render handles HTTPS termination)
+        print(f"🚀 Production mode: Starting on port {port}")
+        print(f"   Frontend URL: {FRONTEND_URL}")
+        print(f"   Backend URL: {PRODUCTION_URL}")
+        print(f"   GitHub Token: {'Configured' if GITHUB_TOKEN else 'NOT CONFIGURED'}")
+        
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=port,
+            # NO SSL here - Render's load balancer provides HTTPS
+        )
+    else:
+        # Development: Local HTTPS with self-signed certificates
+        print(f"🔧 Development mode: Starting HTTPS on port {port}")
+        
+        # Check if certificate files exist
+        cert_path = Path(__file__).parent / "cert.pem"
+        key_path = Path(__file__).parent / "key.pem"
+        
+        if cert_path.exists() and key_path.exists():
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=port,
+                ssl_keyfile=str(key_path),
+                ssl_certfile=str(cert_path)
+            )
+        else:
+            print("⚠️  Warning: SSL certificates not found. Starting HTTP for development.")
+            uvicorn.run(app, host="0.0.0.0", port=port)
