@@ -28,6 +28,9 @@ if IS_PRODUCTION and PRODUCTION_URL:
     allow_origins = [
         FRONTEND_URL,
         PRODUCTION_URL,
+        "https://code-sensei-seven.vercel.app",  # Your exact Vercel URL
+        "https://*.vercel.app",                  # Any Vercel deployment
+        "https://codesensei-eg4h.onrender.com",
         "http://localhost:3000",  # For local testing
         "https://localhost:3000",
     ]
