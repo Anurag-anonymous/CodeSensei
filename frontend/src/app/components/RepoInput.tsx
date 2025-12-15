@@ -23,8 +23,10 @@ export default function RepoInput() {
       if (!githubUrl.includes('github.com')) {
         throw new Error('Please enter a valid GitHub URL');
       }
+// Current setup - should work if NEXT_PUBLIC_API_URL is set
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:8000';
 
-      const response = await fetch('https://localhost:8000/api/analyze', {
+const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ github_url: githubUrl }),
