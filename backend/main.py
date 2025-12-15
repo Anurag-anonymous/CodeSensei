@@ -34,6 +34,13 @@ if IS_PRODUCTION and PRODUCTION_URL:
 else:
     # Development
     allow_origins = [
+        "https://code-sensei-seven.vercel.app",  # Your exact Vercel URL
+        "https://*.vercel.app",                  # Any Vercel deployment
+        "https://codesensei-eg4h.onrender.com",  # Your Render backend
+        "http://localhost:3000",
+        "https://localhost:3000",
+        "http://localhost:8000",
+        "https://localhost:8000",
         "https://localhost:3000",
         "https://192.168.56.1:3000",
         "http://localhost:3000",
