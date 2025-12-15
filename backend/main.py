@@ -171,7 +171,20 @@ async def health_check():
     return {"status": "healthy"}
 
 
-# ... your existing imports and code ...
+@app.get("/")
+async def root():
+    """Root endpoint for health checks and documentation."""
+    return {
+        "service": "CodeSensei Backend",
+        "version": "1.0.0",
+        "endpoints": {
+            "health": "/api/health",
+            "analyze": "/api/analyze",
+            "docs": "/docs"
+        },
+        "status": "operational",
+        "documentation": "https://github.com/Anurag-anonymous/CodeSensei"
+    }
 
 if __name__ == "__main__":
     # === SAFE PORT HANDLING FOR RENDER ===
