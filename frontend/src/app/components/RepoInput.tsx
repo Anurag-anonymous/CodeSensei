@@ -58,7 +58,7 @@ const response = await fetch(`${API_URL}/api/analyze`, {
       {!analysisResult ? (
         <>
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold mb-2">Start Learning Any Codebase</h2>
+            <h2 className="text-3xl bg-gradient-to-r from-blue-600 to-purple-600 font-bold mb-2">Start Learning Any Codebase</h2>
             <p className="text-gray-600 text-lg">
               Paste a GitHub repository URL and let CodeSensei analyze it for you
             </p>
