@@ -7,32 +7,45 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from github import Github, GithubException
 import uvicorn
+import json
+import requests  # Add this
+
 
 # ========== 1. LOAD CONFIGURATION ==========
-# Load from .env file in current directory
 env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path)
 
-# ========== 2. ENVIRONMENT DETECTION ==========
+# ========== 2. API KEYS WITH DEBUG INFO ==========
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # Changed from GEMINI_API_KEY
 
-IS_PRODUCTION = os.getenv("RENDER") is not None  # Render sets this
-PRODUCTION_URL = os.getenv("RENDER_EXTERNAL_URL", "")  # Render provides this
+# DEBUG: Print what keys we have
+print("\n🔑 API KEY STATUS:")
+print(f"GitHub Token: {'✅ SET' if GITHUB_TOKEN else '❌ MISSING'}")
+print(f"OpenRouter API Key: {'✅ SET' if OPENROUTER_API_KEY else '❌ MISSING'}")
 
-# ========== CORS CONFIGURATION ==========
-# Your frontend URL on Vercel
+# Initialize OpenRouter client
+openrouter_client = None
+if OPENROUTER_API_KEY:
+    print("✅ OpenRouter client available")
+    openrouter_client = True  # Simple flag to indicate availability
+else:
+    print("❌ OpenRouter client not initialized (missing API key)")
+
+# ========== 3. ENVIRONMENT DETECTION ==========
+IS_PRODUCTION = os.getenv("RENDER") is not None
+PRODUCTION_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://code-sensei-seven.vercel.app")
 
 # Set allowed origins
 if IS_PRODUCTION and PRODUCTION_URL:
-    # Production: Allow your Vercel frontend and your Render backend
     allow_origins = [
         FRONTEND_URL,
         PRODUCTION_URL,
-        "http://localhost:3000",  # For local testing
+        "http://localhost:3000",
         "https://localhost:3000",
     ]
 else:
-    # Development
     allow_origins = [
         "https://localhost:3000",
         "https://192.168.56.1:3000",
@@ -49,33 +62,152 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class RepoRequest(BaseModel):
     github_url: str
+def get_top_contributors(repo, limit=5):
+    """Get top contributors for a repository."""
+    try:
+        print(f"👥 Fetching top {limit} contributors...")
+        contributors = list(repo.get_contributors()[:limit])
+        
+        contributors_data = []
+        for contributor in contributors:
+            contributors_data.append({
+                "username": contributor.login,
+                "avatar_url": contributor.avatar_url,
+                "contributions": contributor.contributions,
+                "profile_url": contributor.html_url
+            })
+        
+        print(f"✅ Found {len(contributors_data)} contributors")
+        return contributors_data
+    except Exception as e:
+        print(f"⚠️ Could not fetch contributors: {e}")
+        return []
 
-from github import Github, GithubException
-import os
-
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-
+def get_most_active_issues(repo, limit=5):
+    """Get issues with most comments (indicating high activity)."""
+    try:
+        print(f"📝 Fetching top {limit} active issues...")
+        # Get issues sorted by comments (most commented = most active)
+        issues = list(repo.get_issues(state='open', sort='comments', direction='desc')[:limit])
+        
+        issues_data = []
+        for issue in issues:
+            # Check if it's actually an issue (not a PR)
+            if issue.pull_request is None:
+                issues_data.append({
+                    "number": issue.number,
+                    "title": issue.title[:100] + "..." if len(issue.title) > 100 else issue.title,
+                    "url": issue.html_url,
+                    "comments": issue.comments,
+                    "created_at": issue.created_at.isoformat() if issue.created_at else None,
+                    "state": issue.state
+                })
+        
+        print(f"✅ Found {len(issues_data)} active issues")
+        return issues_data
+    except Exception as e:
+        print(f"⚠️ Could not fetch issues: {e}")
+        return []
 @app.post("/api/analyze")
 async def analyze_repo(request: RepoRequest):
-    """Analyze a GitHub repository and return key insights."""
+    """Analyze a GitHub repository with AI insights."""
+    print(f"\n🔍 Analyzing repository: {request.github_url}")
+    
     try:
-
+        # Check for required tokens
+        if not GITHUB_TOKEN:
+            return {
+                "status": "error", 
+                "message": "GitHub token not configured.",
+                "debug": {"github_token_set": False}
+            }
+        
+        print(f"✅ GitHub token available")
+        print(f"✅ OpenRouter available: {openrouter_client is not None}")
+        
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(extract_repo_path(request.github_url))
 
-        # 2. Extract basic information
+        # ========== NEW: Get Contributors & Issues ==========
+        print("📊 Fetching community data...")
+        
+        # Get top contributors (limit to 5 for performance)
+        top_contributors = get_top_contributors(repo, limit=5)
+        
+        # Get most active issues (limit to 5)
+        active_issues = get_most_active_issues(repo, limit=5)
+        # ========== END NEW SECTION ==========
+        
+        # Extract basic information (your existing code)
         languages = repo.get_languages()
         contents = repo.get_contents("")
-        file_structure = list_files_with_limits(contents, repo, path="", max_depth=3, max_files=100, current_depth=0)
+        file_structure = list_files_with_limits(
+            contents, repo, path="", max_depth=3, max_files=100, current_depth=0
+        )
 
-        # 3. Perform basic analysis (You can expand this massively)
+        # Calculate metrics (your existing code)
         primary_language = max(languages, key=languages.get) if languages else "Unknown"
         total_size = sum(languages.values())
+        
+        # Calculate language percentages (your existing code)
+        language_percentages = {
+            lang: f"{(count/total_size)*100:.1f}%" 
+            for lang, count in languages.items()
+        }
+        
+        # Get AI analysis (your existing code)
+        ai_analysis = None
+        if openrouter_client:
+            print("🤖 Calling OpenRouter (DeepSeek) API...")
+            try:
+                # Enhance the AI prompt with contributor info
+                enhanced_prompt = f"""
+                You are CodeSensei, an AI mentor for codebases.
 
-        # 4. Structure the response for your frontend features
+                Briefly analyze this repository:
+                Name: {repo.full_name}
+                Description: {repo.description or "No description"}
+                Primary Language: {primary_language}
+                File Count: {len(file_structure)}
+                Top Contributors: {len(top_contributors)} contributors
+                Active Issues: {len(active_issues)} active discussions
+
+                Provide a short educational summary in JSON format with this structure:
+                {{
+                    "ai_summary": "A 2-3 sentence educational overview",
+                    "tech_insights": ["Insight 1", "Insight 2"],
+                    "learning_path": ["Step 1: Start with X", "Step 2: Learn Y"],
+                    "patterns": ["Pattern 1", "Pattern 2"],
+                    "community_tips": ["Tip about contributors", "Tip about issue engagement"]
+                }}
+
+                Keep it concise and educational.
+                """
+                
+                ai_analysis = analyze_with_openrouter(
+                    repo.full_name,
+                    repo.description,
+                    languages,
+                    file_structure[:20],
+                    primary_language,
+                    len(file_structure)
+                )
+                print("✅ OpenRouter analysis successful")
+            except Exception as e:
+                print(f"❌ OpenRouter error: {e}")
+                ai_analysis = {
+                    "ai_summary": f"OpenRouter API Error: {str(e)[:100]}...",
+                    "tech_insights": [],
+                    "learning_path": [],
+                    "patterns": [],
+                    "community_tips": []
+                }
+        else:
+            print("⚠️ OpenRouter client not available, skipping AI analysis")
+        
+        # Structure the response - ADD THE NEW FIELDS
         analysis_result = {
             "status": "success",
             "repo_info": {
@@ -84,35 +216,220 @@ async def analyze_repo(request: RepoRequest):
                 "stars": repo.stargazers_count,
                 "forks": repo.forks_count,
                 "url": repo.html_url,
+                "open_issues": repo.open_issues_count,  # Add this
+                "watchers": repo.subscribers_count,      # Add this
             },
             "tech_analysis": {
-                "languages": {lang: f"{(count/total_size)*100:.1f}%" for lang, count in languages.items()},
+                "languages": language_percentages,
                 "primary_language": primary_language,
                 "file_count": len(file_structure),
-                "sample_structure": file_structure[:10],  # First 10 files
+                "sample_structure": file_structure[:10],
+                "top_languages": list(languages.keys())[:5] if languages else []
             },
+            # ========== NEW: Community Data ==========
+            "community_data": {
+                "top_contributors": top_contributors,
+                "active_issues": active_issues,
+                "contributor_count": repo.get_contributors().totalCount,
+                "issue_engagement": sum(issue.get("comments", 0) for issue in active_issues) if active_issues else 0
+            },
+            # ========== END NEW ==========
             "learning_metrics": {
-                "complexity_score": calculate_complexity(languages, file_structure),  # See helper below
+                "complexity_score": calculate_enhanced_complexity(languages, file_structure),
+                "complexity_level": get_complexity_level(calculate_enhanced_complexity(languages, file_structure)),
                 "recommended_start": recommend_starting_point(file_structure, primary_language),
+                "community_score": calculate_community_score(top_contributors, active_issues),  # New metric
             },
-            # This 'summary' field is ready to be fed to your future AI/chat feature
-            "ai_summary": f"The repository {repo.full_name} is primarily written in {primary_language}. "
-                          f"Key structure includes {len(file_structure)} files. "
-                          f"A good starting point for learning is {recommend_starting_point(file_structure, primary_language)}."
+            # AI-generated content
+            "ai_analysis": ai_analysis or {
+                "ai_summary": "AI analysis is not enabled.",
+                "tech_insights": [],
+                "learning_path": [],
+                "patterns": [],
+                "community_tips": []
+            },
+            "has_ai_analysis": ai_analysis is not None,
+            "debug_info": {
+                "openrouter_available": openrouter_client is not None,
+                "openrouter_key_set": bool(OPENROUTER_API_KEY),
+                "github_token_set": bool(GITHUB_TOKEN),
+                "file_count": len(file_structure),
+                "language_count": len(languages),
+                "contributors_fetched": len(top_contributors),
+                "issues_fetched": len(active_issues)
+            }
         }
+        
+        print(f"✅ Analysis complete. Has AI: {ai_analysis is not None}")
+        print(f"   Contributors: {len(top_contributors)}, Active Issues: {len(active_issues)}")
         return analysis_result
 
     except GithubException as e:
-        return {"status": "error", "message": f"GitHub API error: {e.data.get('message', str(e))}"}
+        print(f"❌ GitHub API error: {e}")
+        return {
+            "status": "error", 
+            "message": f"GitHub API error: {e.data.get('message', str(e))}",
+            "debug": {"github_error": True}
+        }
     except Exception as e:
-        return {"status": "error", "message": f"An unexpected error occurred: {str(e)}"}
+        print(f"❌ Unexpected error: {e}")
+        return {
+            "status": "error", 
+            "message": f"An unexpected error occurred: {str(e)}",
+            "debug": {"error": str(e)}
+        }
+    
 
+def calculate_community_score(contributors, issues):
+    """Calculate a community engagement score (0-10)."""
+    if not contributors and not issues:
+        return 0.0
+    
+    # Factors
+    contributor_score = min(5, len(contributors) * 0.5)
+    
+    # Issue engagement score
+    total_comments = sum(issue.get("comments", 0) for issue in issues)
+    issue_score = min(5, total_comments * 0.1)
+    
+    # Combined score
+    score = contributor_score + issue_score
+    
+    return round(min(10, score), 1)
 
-# --- Helper Functions (Add these above or below your main function) ---
+def analyze_with_openrouter(repo_name, description, languages, file_structure, primary_language, file_count):
+    """Analyze repository using OpenRouter API with DeepSeek model."""
+    try:
+        # Create prompt
+        prompt = f"""
+        You are CodeSensei, an AI mentor for codebases.
 
+        Briefly analyze this repository:
+        Name: {repo_name}
+        Description: {description or "No description"}
+        Primary Language: {primary_language}
+        File Count: {file_count}
+
+        Provide a short educational summary in JSON format with this structure:
+        {{
+            "ai_summary": "A 2-3 sentence educational overview",
+            "tech_insights": ["Insight 1", "Insight 2"],
+            "learning_path": ["Step 1: Start with X", "Step 2: Learn Y"],
+            "patterns": ["Pattern 1", "Pattern 2"]
+        }}
+
+        Keep it concise and educational.
+        """
+
+        print(f"📝 Sending prompt to OpenRouter...")
+        
+        # OpenRouter API endpoint
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Request payload - using DeepSeek Free model
+        payload = {
+            "model": "deepseek/deepseek-chat",  # Free model
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "max_tokens": 500,
+            "temperature": 0.7
+        }
+        
+        # Make API call
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code != 200:
+            error_msg = f"API returned {response.status_code}: {response.text}"
+            print(f"❌ OpenRouter API error: {error_msg}")
+            raise Exception(error_msg)
+        
+        result = response.json()
+        
+        # Extract content
+        content = result['choices'][0]['message']['content']
+        print(f"📥 Received response from OpenRouter: {content[:100]}...")
+
+        try:
+            # Try to find and parse JSON
+            json_start = content.find('{')
+            json_end = content.rfind('}') + 1
+            if json_start != -1 and json_end != 0:
+                result_json = json.loads(content[json_start:json_end])
+                print("✅ Successfully parsed OpenRouter JSON response")
+                return result_json
+            else:
+                # If no JSON, return the content as summary
+                print("⚠️ No JSON found in response, using raw content")
+                return {
+                    "ai_summary": content,
+                    "tech_insights": [],
+                    "learning_path": [],
+                    "patterns": []
+                }
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON parse error: {e}")
+            return {
+                "ai_summary": content,
+                "tech_insights": [],
+                "learning_path": [],
+                "patterns": []
+            }
+
+    except Exception as e:
+        print(f"❌ OpenRouter API call failed: {e}")
+        raise
+
+def calculate_enhanced_complexity(languages, files, ai_analysis=None):
+    """More sophisticated complexity calculation."""
+    # Base factors
+    lang_diversity = len(languages)
+    file_count = len(files)
+    
+    # Language complexity weights (you can expand this)
+    complexity_weights = {
+        "C++": 2.0, "Rust": 1.8, "Go": 1.5, 
+        "Python": 1.0, "JavaScript": 1.0, "TypeScript": 1.2,
+        "Java": 1.3, "Kotlin": 1.3, "Swift": 1.3,
+        "HTML": 0.5, "CSS": 0.5, "Markdown": 0.1
+    }
+    
+    # Weighted language complexity
+    lang_complexity = 0
+    for lang in languages:
+        lang_complexity += complexity_weights.get(lang, 1.0)
+    
+    # File complexity (more files = more complex, but diminishing returns)
+    file_factor = min(5, file_count / 50)
+    
+    # Combine factors
+    score = (lang_diversity * 0.5) + (lang_complexity * 0.3) + (file_factor * 2)
+    
+    # Cap at 10 and round
+    return round(min(10, score), 1)
+
+def get_complexity_level(score):
+    """Convert numeric score to descriptive level."""
+    if score < 3:
+        return "Beginner"
+    elif score < 6:
+        return "Intermediate"
+    elif score < 8:
+        return "Advanced"
+    else:
+        return "Expert"
+
+# --- Keep existing helper functions ---
 def extract_repo_path(url: str) -> str:
     """Extracts 'owner/repo' from a GitHub URL."""
-    # Simple extraction - you might want a more robust version
     parts = url.rstrip('/').split('/')
     return f"{parts[-2]}/{parts[-1]}"
 
@@ -128,7 +445,6 @@ def list_files_with_limits(contents, repo, path="", max_depth=3, max_files=100, 
         
         if content.type == "dir":
             try:
-                # Only go deeper if we haven't hit limits
                 if current_depth < max_depth - 1 and len(files) < max_files:
                     sub_files = list_files_with_limits(
                         repo.get_contents(content.path),
@@ -146,48 +462,44 @@ def list_files_with_limits(contents, repo, path="", max_depth=3, max_files=100, 
     
     return files
 
-def calculate_complexity(languages, files):
-    """A simplistic complexity heuristic. You should improve this!"""
-    lang_diversity = len(languages)
-    file_count = len(files)
-    # Very basic score from 1-10
-    score = min(10, (lang_diversity * 2) + (file_count / 100))
-    return round(score, 1)
-
 def recommend_starting_point(files, primary_lang):
     """Suggests a starting file based on common patterns."""
     look_for = {
-        "Python": ["README.md", "requirements.txt", "app.py", "main.py"],
+        "Python": ["README.md", "requirements.txt", "setup.py", "app.py", "main.py"],
         "JavaScript": ["README.md", "package.json", "src/index.js", "src/App.js"],
         "TypeScript": ["README.md", "package.json", "src/index.ts", "src/App.tsx"],
+        "Java": ["README.md", "pom.xml", "build.gradle", "src/main/java/Main.java"],
+        "Go": ["README.md", "go.mod", "main.go"],
+        "Rust": ["README.md", "Cargo.toml", "src/main.rs"],
     }
     for filename in look_for.get(primary_lang, ["README.md"]):
         if any(filename in f for f in files):
             return filename
     return files[0] if files else "README.md"
 
+
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy"}
-
+    return {
+        "status": "healthy",
+        "services": {
+            "github_api": "✅" if GITHUB_TOKEN else "❌",
+            "openrouter_api": "✅" if OPENROUTER_API_KEY else "❌"
+        }
+    }
 
 @app.get("/")
 async def root():
-    """Root endpoint for health checks and documentation."""
     return {
         "service": "CodeSensei Backend",
-        "version": "1.0.0",
-        "endpoints": {
-            "health": "/api/health",
-            "analyze": "/api/analyze",
-            "docs": "/docs"
-        },
+        "version": "1.2.0",
+        "features": ["GitHub Analysis", "AI-Powered Insights (DeepSeek via OpenRouter)", "Learning Path Generation"],
         "status": "operational",
         "documentation": "https://github.com/Anurag-anonymous/CodeSensei"
     }
 
+# ========== 4. DEPLOYMENT ==========
 if __name__ == "__main__":
-    # === SAFE PORT HANDLING FOR RENDER ===
     port_str = os.getenv("PORT", "").strip()
     
     if port_str and port_str.isdigit():
@@ -197,19 +509,18 @@ if __name__ == "__main__":
         port = 8000
         print(f"⚠️  Using default PORT: {port}")
     
-    # === DETECT ENVIRONMENT ===
     is_render = os.getenv("RENDER") is not None
     
     print(f"\n🚀 Starting CodeSensei Backend")
     print(f"   Environment: {'Production (Render)' if is_render else 'Development'}")
     print(f"   Port: {port}")
     print(f"   GitHub Token: {'✅ Loaded' if GITHUB_TOKEN else '❌ Missing'}")
+    print(f"   OpenRouter API Key: {'✅ Loaded' if OPENROUTER_API_KEY else '❌ Missing'}")
+    print(f"   AI Model: DeepSeek Chat (Free via OpenRouter)")
     
     if is_render:
-        # Production on Render - HTTP only
         uvicorn.run(app, host="0.0.0.0", port=port)
     else:
-        # Local development - try HTTPS, fallback to HTTP
         cert_path = Path(__file__).parent / "cert.pem"
         key_path = Path(__file__).parent / "key.pem"
         
