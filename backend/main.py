@@ -44,6 +44,7 @@ if IS_PRODUCTION and PRODUCTION_URL:
         PRODUCTION_URL,
         "http://localhost:3000",
         "https://localhost:3000",
+        "https://code-sensei-git-main-anurag-anonymous-1188s-projects.vercel.app",
     ]
 else:
     allow_origins = [
